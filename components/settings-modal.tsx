@@ -39,7 +39,8 @@ export function SettingsModal({ open, onClose, onSave }: SettingsModalProps) {
   };
 
   const handleSave = () => {
-    const cleaned: AppCredentials = {};
+    const existing = loadStoredCredentials();
+    const cleaned: AppCredentials = { ...existing };
     for (const [key, value] of Object.entries(form)) {
       if (value?.trim()) {
         cleaned[key as keyof AppCredentials] = value.trim();

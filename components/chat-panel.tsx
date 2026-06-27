@@ -9,6 +9,7 @@ interface ChatPanelProps {
   setInput: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   isGenerating: boolean;
+  error?: string | null;
 }
 
 const SUGGESTIONS = [
@@ -44,6 +45,7 @@ export function ChatPanel({
   setInput,
   onSubmit,
   isGenerating,
+  error,
 }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +140,11 @@ export function ChatPanel({
         onSubmit={onSubmit}
         className="shrink-0 border-t border-zinc-800 p-4"
       >
+        {error && (
+          <div className="mb-3 rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-xs text-red-300">
+            {error}
+          </div>
+        )}
         <div className="flex gap-2 rounded-xl border border-zinc-700 bg-zinc-900 p-2 focus-within:border-indigo-500/50">
           <textarea
             value={input}

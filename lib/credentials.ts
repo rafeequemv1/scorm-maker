@@ -21,7 +21,10 @@ export function resolveCredentials(
 ): ResolvedCredentials {
   return {
     googleApiKey:
-      input?.googleApiKey?.trim() || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+      input?.googleApiKey?.trim() ||
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_API_KEY,
     aiGatewayApiKey:
       input?.aiGatewayApiKey?.trim() || process.env.AI_GATEWAY_API_KEY,
     vercelToken: input?.vercelToken?.trim() || process.env.VERCEL_TOKEN,

@@ -7,10 +7,15 @@ import {
   toUIMessageStream,
   UIMessage,
 } from "ai";
-import { getProjectSandbox } from "@/lib/sandbox";
 import { getChatModel } from "@/lib/ai";
 import type { AppCredentials } from "@/lib/credentials";
-import { BUILDER_SYSTEM_PROMPT, createBuilderTools } from "@/lib/tools";
+import { getProviderStatus, resolveCredentials } from "@/lib/credentials";
+import { getProjectSandbox } from "@/lib/sandbox";
+import {
+  BUILDER_SYSTEM_PROMPT,
+  createBuilderTools,
+  type SandboxContext,
+} from "@/lib/tools";
 import type { BuilderUIMessage } from "@/lib/types";
 
 export const maxDuration = 300;
@@ -29,23 +34,60 @@ export async function POST(req: Request) {
     });
   }
 
-  try {
-    const { sandbox, previewUrl } = await getProjectSandbox(
-      projectId,
-      credentials,
+  const resolved = resolveCredentials(credentials);
+  if (!resolved.googleApiKey && !resolved.aiGatewayApiKey) {
+    return new Response(
+      JSON.stringify({
+        error:
+          "No API key found. Add your Gemini key in Settings or set GOOGLE_GENERATIVE_AI_API_KEY in Vercel env vars.",
+      }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
     );
-    const tools = createBuilderTools(sandbox);
+  }
 
+  let model;
+  try {
+    model = getChatModel(modelId, credentials);
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Invalid model config",
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const sandboxAvailable = getProviderStatus(credentials).sandbox;
+  let sandboxPromise: Promise<SandboxContext> | null = null;
+
+  const getSandbox = () => {
+    if (!sandboxPromise) {
+      sandboxPromise = getProjectSandbox(projectId, credentials);
+    }
+    return sandboxPromise;
+  };
+
+  const tools = createBuilderTools(getSandbox, credentials);
+
+  try {
     const stream = createUIMessageStream<BuilderUIMessage>({
       originalMessages: messages as BuilderUIMessage[],
       execute: async ({ writer }) => {
-        writer.write({
-          type: "data-preview",
-          data: { url: previewUrl, status: "ready" },
-        });
+        if (sandboxAvailable) {
+          getSandbox()
+            .then(({ previewUrl }) => {
+              writer.write({
+                type: "data-preview",
+                data: { url: previewUrl, status: "ready" },
+              });
+            })
+            .catch((err) => {
+              console.error("Sandbox preview failed:", err);
+            });
+        }
 
         const result = streamText({
-          model: getChatModel(modelId, credentials),
+          model,
           system: BUILDER_SYSTEM_PROMPT,
           messages: await convertToModelMessages(messages),
           tools,

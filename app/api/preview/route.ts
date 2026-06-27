@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AppCredentials } from "@/lib/credentials";
-import { getProjectSandbox, listProjectFiles } from "@/lib/sandbox";
+import { getProviderStatus } from "@/lib/credentials";
+import {
+  getProjectSandbox,
+  getSandboxSetupHint,
+  listProjectFiles,
+} from "@/lib/sandbox";
 
 export const maxDuration = 300;
 
@@ -13,6 +18,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "projectId is required" },
       { status: 400 },
+    );
+  }
+
+  if (!getProviderStatus(credentials).sandbox) {
+    return NextResponse.json(
+      {
+        error:
+          getSandboxSetupHint(credentials) ??
+          "Sandbox not configured. Chat still works — add Vercel credentials in Settings for preview.",
+        skipped: true,
+      },
+      { status: 503 },
     );
   }
 

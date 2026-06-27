@@ -25,7 +25,7 @@ function getOrCreateProjectId(): string {
 }
 
 export function Builder() {
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(getOrCreateProjectId);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [files, setFiles] = useState<string[]>([]);
   const [previewLoading, setPreviewLoading] = useState(true);
@@ -34,14 +34,19 @@ export function Builder() {
   const [modelId, setModelId] = useState(DEFAULT_MODEL_ID);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [setupHint, setSetupHint] = useState<string | null>(null);
+  const [sandboxReady, setSandboxReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [credentials, setCredentials] = useState<AppCredentials>({});
+  const [chatError, setChatError] = useState<string | null>(null);
   const previewKey = useRef(0);
-  const credentialsRef = useRef<AppCredentials>({});
 
-  useEffect(() => {
-    credentialsRef.current = credentials;
-  }, [credentials]);
+  const credentialsRef = useRef<AppCredentials>({});
+  const projectIdRef = useRef(projectId);
+  const modelIdRef = useRef(modelId);
+
+  credentialsRef.current = credentials;
+  projectIdRef.current = projectId || getOrCreateProjectId();
+  modelIdRef.current = modelId;
 
   const refreshPreview = useCallback(() => {
     previewKey.current += 1;
@@ -61,12 +66,23 @@ export function Builder() {
       setAvailableModels([]);
     }
     setSetupHint(data.setupHint ?? null);
+    setSandboxReady(Boolean(data.sandbox?.sandbox));
+    return data as { sandbox?: { sandbox: boolean; onVercel?: boolean } };
   }, []);
 
   const initPreview = useCallback(
-    async (id: string, creds: AppCredentials) => {
+    async (id: string, creds: AppCredentials, sandboxAvailable: boolean) => {
       setPreviewLoading(true);
       setPreviewError(null);
+
+      if (!sandboxAvailable) {
+        setPreviewLoading(false);
+        setPreviewError(
+          "Preview needs Vercel Sandbox. On local dev, add Vercel Token + Team ID + Project ID in Settings. Chat still works with just a Gemini key.",
+        );
+        return;
+      }
+
       try {
         const res = await fetch("/api/preview", {
           method: "POST",
@@ -87,40 +103,58 @@ export function Builder() {
   );
 
   const applyCredentials = useCallback(
-    (creds: AppCredentials) => {
+    async (creds: AppCredentials) => {
       setCredentials(creds);
-      fetchModels(creds);
-      if (projectId) initPreview(projectId, creds);
+      const data = await fetchModels(creds);
+      const id = projectIdRef.current;
+      await initPreview(id, creds, Boolean(data.sandbox?.sandbox));
     },
-    [fetchModels, initPreview, projectId],
+    [fetchModels, initPreview],
   );
 
   useEffect(() => {
     const creds = loadStoredCredentials();
     setCredentials(creds);
-    fetchModels(creds);
 
-    const id = getOrCreateProjectId();
-    setProjectId(id);
-    initPreview(id, creds);
+    (async () => {
+      const data = await fetchModels(creds);
+      const id = getOrCreateProjectId();
+      setProjectId(id);
+      await initPreview(id, creds, Boolean(data.sandbox?.sandbox));
 
-    if (!creds.googleApiKey && !creds.aiGatewayApiKey) {
-      setSettingsOpen(true);
-    }
+      if (!creds.googleApiKey && !creds.aiGatewayApiKey) {
+        setSettingsOpen(true);
+      }
+    })();
   }, [fetchModels, initPreview]);
 
   const { messages, sendMessage, status } = useChat<BuilderUIMessage>({
     transport: new DefaultChatTransport({
       api: "/api/chat",
-      prepareSendMessagesRequest: ({ messages, body }) => ({
+      prepareSendMessagesRequest: ({
+        messages,
+        body,
+        id,
+        trigger,
+        messageId,
+      }) => ({
         body: {
           ...body,
-          projectId,
-          modelId,
+          id,
+          messages,
+          trigger,
+          messageId,
+          projectId: projectIdRef.current || getOrCreateProjectId(),
+          modelId: modelIdRef.current,
           credentials: credentialsRef.current,
         },
       }),
     }),
+    onError: (error) => {
+      setChatError(
+        error.message || "Chat failed. Check your API key in Settings.",
+      );
+    },
     onData: (dataPart) => {
       if (dataPart.type === "data-preview") {
         setPreviewUrl(dataPart.data.url);
@@ -138,11 +172,23 @@ export function Builder() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text || isGenerating || !projectId) return;
-    if (!credentials.googleApiKey && !credentials.aiGatewayApiKey) {
+    if (!text || isGenerating) return;
+
+    const id = projectIdRef.current || getOrCreateProjectId();
+    if (!projectId) setProjectId(id);
+
+    const hasClientKey =
+      Boolean(credentials.googleApiKey) ||
+      Boolean(credentials.aiGatewayApiKey);
+    const hasServerKey = availableModels.length > 0;
+
+    if (!hasClientKey && !hasServerKey) {
+      setChatError("Add your Gemini API key in Settings first.");
       setSettingsOpen(true);
       return;
     }
+
+    setChatError(null);
     sendMessage({ text });
     setInput("");
   };
@@ -151,10 +197,11 @@ export function Builder() {
     const id = crypto.randomUUID();
     localStorage.setItem(PROJECT_ID_KEY, id);
     setProjectId(id);
+    projectIdRef.current = id;
     setPreviewUrl(null);
     setFiles([]);
     setPreviewLoading(true);
-    initPreview(id, credentials);
+    initPreview(id, credentials, sandboxReady);
   };
 
   return (
@@ -227,6 +274,7 @@ export function Builder() {
           setInput={setInput}
           onSubmit={handleSubmit}
           isGenerating={isGenerating}
+          error={chatError}
         />
         <PreviewPanel
           previewUrl={previewUrl}

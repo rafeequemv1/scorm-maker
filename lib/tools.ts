@@ -3,12 +3,33 @@ import { z } from "zod";
 import type { Sandbox } from "@vercel/sandbox";
 import {
   ensurePreviewServer,
+  getSandboxSetupHint,
   listProjectFiles,
   readProjectFile,
   writeProjectFiles,
 } from "./sandbox";
+import type { AppCredentials } from "./credentials";
+import { getProviderStatus } from "./credentials";
 
-export function createBuilderTools(sandbox: Sandbox) {
+export type SandboxContext = {
+  sandbox: Sandbox;
+  previewUrl: string;
+};
+
+export function createBuilderTools(
+  getSandbox: () => Promise<SandboxContext>,
+  credentials?: AppCredentials,
+) {
+  const requireSandbox = async () => {
+    if (!getProviderStatus(credentials).sandbox) {
+      throw new Error(
+        getSandboxSetupHint(credentials) ??
+          "Sandbox not configured. Preview will not work until Vercel Sandbox is set up.",
+      );
+    }
+    return getSandbox();
+  };
+
   return {
     writeFiles: tool({
       description:
@@ -24,6 +45,7 @@ export function createBuilderTools(sandbox: Sandbox) {
           .min(1),
       }),
       execute: async ({ files }) => {
+        const { sandbox } = await requireSandbox();
         const written = await writeProjectFiles(sandbox, files);
         const previewUrl = await ensurePreviewServer(sandbox);
         return {
@@ -41,6 +63,7 @@ export function createBuilderTools(sandbox: Sandbox) {
         path: z.string().describe("Relative file path to read"),
       }),
       execute: async ({ path }) => {
+        const { sandbox } = await requireSandbox();
         const content = await readProjectFile(sandbox, path);
         return { path, content };
       },
@@ -50,6 +73,7 @@ export function createBuilderTools(sandbox: Sandbox) {
       description: "List all files in the website project.",
       inputSchema: z.object({}),
       execute: async () => {
+        const { sandbox } = await requireSandbox();
         const files = await listProjectFiles(sandbox);
         return { files };
       },
