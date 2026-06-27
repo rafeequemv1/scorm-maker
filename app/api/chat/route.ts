@@ -67,12 +67,42 @@ export async function POST(req: Request) {
     return sandboxPromise;
   };
 
-  const tools = createBuilderTools(getSandbox, credentials);
-
   try {
     const stream = createUIMessageStream<BuilderUIMessage>({
       originalMessages: messages as BuilderUIMessage[],
       execute: async ({ writer }) => {
+        writer.write({
+          type: "data-status",
+          data: { message: "Thinking..." },
+          transient: true,
+        });
+
+        const tools = createBuilderTools(getSandbox, credentials, (event) => {
+          if (event.type === "status") {
+            writer.write({
+              type: "data-status",
+              data: { message: event.message },
+              transient: true,
+            });
+          }
+          if (event.type === "files-written") {
+            for (const file of event.files) {
+              writer.write({
+                type: "data-fileContent",
+                data: { path: file.path, content: file.content },
+              });
+            }
+            writer.write({
+              type: "data-files",
+              data: { paths: event.written },
+            });
+            writer.write({
+              type: "data-preview",
+              data: { url: event.previewUrl, status: "ready" },
+            });
+          }
+        });
+
         if (sandboxAvailable) {
           getSandbox()
             .then(({ previewUrl }) => {
@@ -92,33 +122,6 @@ export async function POST(req: Request) {
           messages: await convertToModelMessages(messages),
           tools,
           stopWhen: isStepCount(10),
-          onStepEnd: ({ toolResults }) => {
-            for (const toolResult of toolResults) {
-              if (
-                toolResult.toolName === "writeFiles" &&
-                toolResult.output &&
-                typeof toolResult.output === "object" &&
-                "previewUrl" in toolResult.output
-              ) {
-                writer.write({
-                  type: "data-preview",
-                  data: {
-                    url: String(toolResult.output.previewUrl),
-                    status: "ready",
-                  },
-                });
-                if (
-                  "written" in toolResult.output &&
-                  Array.isArray(toolResult.output.written)
-                ) {
-                  writer.write({
-                    type: "data-files",
-                    data: { paths: toolResult.output.written as string[] },
-                  });
-                }
-              }
-            }
-          },
         });
 
         writer.merge(

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { BuilderUIMessage } from "@/lib/types";
+import { renderMessageParts } from "./chat-message-parts";
 
 interface ChatPanelProps {
   messages: BuilderUIMessage[];
@@ -10,6 +11,7 @@ interface ChatPanelProps {
   onSubmit: (e: React.FormEvent) => void;
   isGenerating: boolean;
   error?: string | null;
+  buildStatus?: string | null;
 }
 
 const SUGGESTIONS = [
@@ -19,26 +21,6 @@ const SUGGESTIONS = [
   "Design a restaurant menu website",
 ];
 
-function ToolBadge({ name, state }: { name: string; state: string }) {
-  const labels: Record<string, string> = {
-    writeFiles: "Writing files",
-    readFile: "Reading file",
-    listFiles: "Listing files",
-  };
-  const label = labels[name] ?? name;
-  const isDone = state === "output-available" || state === "output-error";
-
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3 py-2 text-xs text-zinc-400">
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${isDone ? "bg-emerald-500" : "animate-pulse bg-indigo-400"}`}
-      />
-      {label}
-      {isDone && <span className="text-emerald-500">✓</span>}
-    </div>
-  );
-}
-
 export function ChatPanel({
   messages,
   input,
@@ -46,12 +28,22 @@ export function ChatPanel({
   onSubmit,
   isGenerating,
   error,
+  buildStatus,
 }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isGenerating]);
+  }, [messages, isGenerating, buildStatus]);
+
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const hasAssistantContent = Boolean(
+    lastAssistant?.parts.some(
+      (p) =>
+        (p.type === "text" && p.text.trim()) ||
+        (typeof p.type === "string" && p.type.startsWith("tool-")),
+    ),
+  );
 
   return (
     <div className="flex w-full max-w-md shrink-0 flex-col border-r border-zinc-800 lg:max-w-lg xl:max-w-xl">
@@ -94,40 +86,21 @@ export function ChatPanel({
                       : "bg-zinc-800/80 text-zinc-200"
                   }`}
                 >
-                  {message.parts.map((part, i) => {
-                    if (part.type === "text") {
-                      return (
-                        <p key={`${message.id}-${i}`} className="whitespace-pre-wrap">
-                          {part.text}
-                        </p>
-                      );
-                    }
-                    if (part.type.startsWith("tool-")) {
-                      const toolName = part.type.replace("tool-", "");
-                      const state =
-                        "state" in part ? String(part.state) : "running";
-                      return (
-                        <ToolBadge
-                          key={`${message.id}-${i}`}
-                          name={toolName}
-                          state={state}
-                        />
-                      );
-                    }
-                    return null;
-                  })}
+                  {renderMessageParts(message)}
                 </div>
               </div>
             ))}
-            {isGenerating && messages.at(-1)?.role !== "assistant" && (
+            {isGenerating && !hasAssistantContent && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-2xl bg-zinc-800/80 px-4 py-3 text-sm text-zinc-400">
-                  <span className="flex gap-1">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:0ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:150ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:300ms]" />
-                  </span>
-                  Building...
+                <div className="rounded-2xl bg-zinc-800/80 px-4 py-3 text-sm text-zinc-400">
+                  <div className="flex items-center gap-2">
+                    <span className="flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:150ms]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:300ms]" />
+                    </span>
+                    {buildStatus ?? "Building..."}
+                  </div>
                 </div>
               </div>
             )}

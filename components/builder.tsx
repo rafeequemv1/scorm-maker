@@ -9,8 +9,9 @@ import type { ModelOption } from "@/lib/models";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { BuilderUIMessage } from "@/lib/types";
 import { ChatPanel } from "./chat-panel";
-import { PreviewPanel } from "./preview-panel";
 import { SettingsModal } from "./settings-modal";
+import { WorkspacePanel } from "./workspace-panel";
+import type { ProjectFileMap } from "./code-panel";
 
 const PROJECT_ID_KEY = "siteforge-project-id";
 
@@ -28,8 +29,13 @@ export function Builder() {
   const [projectId, setProjectId] = useState(getOrCreateProjectId);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [files, setFiles] = useState<string[]>([]);
+  const [fileContents, setFileContents] = useState<ProjectFileMap>({});
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"preview" | "code">("preview");
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [filesLoading, setFilesLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [buildStatus, setBuildStatus] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [modelId, setModelId] = useState(DEFAULT_MODEL_ID);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -52,6 +58,50 @@ export function Builder() {
     previewKey.current += 1;
   }, []);
 
+  const mergeFileContents = useCallback(
+    (entries: Array<{ path: string; content: string }>) => {
+      setFileContents((prev) => {
+        const next = { ...prev };
+        for (const entry of entries) {
+          next[entry.path] = entry.content;
+        }
+        return next;
+      });
+      setFiles((prev) => [...new Set([...prev, ...entries.map((e) => e.path)])]);
+      if (!selectedFile && entries[0]) {
+        setSelectedFile(entries[0].path);
+      }
+    },
+    [selectedFile],
+  );
+
+  const fetchAllFiles = useCallback(
+    async (id: string, creds: AppCredentials) => {
+      if (!sandboxReady) return;
+      setFilesLoading(true);
+      try {
+        const res = await fetch("/api/files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: id, credentials: creds }),
+        });
+        const data = await res.json();
+        if (res.ok && data.files) {
+          setFiles(data.files);
+          setFileContents(data.contents ?? {});
+          if (!selectedFile && data.files[0]) {
+            setSelectedFile(data.files[0]);
+          }
+        }
+      } catch {
+        // ignore fetch errors
+      } finally {
+        setFilesLoading(false);
+      }
+    },
+    [sandboxReady, selectedFile],
+  );
+
   const fetchModels = useCallback(async (creds: AppCredentials) => {
     const res = await fetch("/api/models", {
       method: "POST",
@@ -71,14 +121,18 @@ export function Builder() {
   }, []);
 
   const initPreview = useCallback(
-    async (id: string, creds: AppCredentials, sandboxAvailable: boolean) => {
+    async (
+      id: string,
+      creds: AppCredentials,
+      sandboxAvailable: boolean,
+    ) => {
       setPreviewLoading(true);
       setPreviewError(null);
 
       if (!sandboxAvailable) {
         setPreviewLoading(false);
         setPreviewError(
-          "Preview needs Vercel Sandbox. On local dev, add Vercel Token + Team ID + Project ID in Settings. Chat still works with just a Gemini key.",
+          "Preview needs Vercel Sandbox. Chat and Code view still work — add Vercel credentials in Settings for live preview.",
         );
         return;
       }
@@ -93,13 +147,15 @@ export function Builder() {
         if (!res.ok) throw new Error(data.error ?? "Failed to load preview");
         setPreviewUrl(data.previewUrl);
         setFiles(data.files ?? []);
+        if (data.files?.[0]) setSelectedFile(data.files[0]);
+        await fetchAllFiles(id, creds);
       } catch (err) {
         setPreviewError(err instanceof Error ? err.message : "Preview failed");
       } finally {
         setPreviewLoading(false);
       }
     },
-    [],
+    [fetchAllFiles],
   );
 
   const applyCredentials = useCallback(
@@ -151,11 +207,26 @@ export function Builder() {
       }),
     }),
     onError: (error) => {
+      setBuildStatus(null);
       setChatError(
         error.message || "Chat failed. Check your API key in Settings.",
       );
     },
+    onFinish: () => {
+      setBuildStatus(null);
+      fetchAllFiles(projectIdRef.current, credentialsRef.current);
+    },
     onData: (dataPart) => {
+      if (dataPart.type === "data-status") {
+        setBuildStatus(dataPart.data.message);
+      }
+      if (dataPart.type === "data-fileContent") {
+        mergeFileContents([
+          { path: dataPart.data.path, content: dataPart.data.content },
+        ]);
+        setViewMode("code");
+        setSelectedFile(dataPart.data.path);
+      }
       if (dataPart.type === "data-preview") {
         setPreviewUrl(dataPart.data.url);
         setPreviewLoading(false);
@@ -189,6 +260,7 @@ export function Builder() {
     }
 
     setChatError(null);
+    setBuildStatus("Starting...");
     sendMessage({ text });
     setInput("");
   };
@@ -200,6 +272,8 @@ export function Builder() {
     projectIdRef.current = id;
     setPreviewUrl(null);
     setFiles([]);
+    setFileContents({});
+    setSelectedFile(null);
     setPreviewLoading(true);
     initPreview(id, credentials, sandboxReady);
   };
@@ -233,9 +307,13 @@ export function Builder() {
             </select>
           )}
           {files.length > 0 && (
-            <span className="hidden text-xs text-zinc-500 sm:inline">
+            <button
+              type="button"
+              onClick={() => setViewMode("code")}
+              className="hidden text-xs text-zinc-500 hover:text-zinc-300 sm:inline"
+            >
               {files.length} file{files.length !== 1 ? "s" : ""}
-            </span>
+            </button>
           )}
           <button
             type="button"
@@ -275,14 +353,24 @@ export function Builder() {
           onSubmit={handleSubmit}
           isGenerating={isGenerating}
           error={chatError}
+          buildStatus={buildStatus}
         />
-        <PreviewPanel
+        <WorkspacePanel
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
           previewUrl={previewUrl}
           loading={previewLoading}
           error={previewError}
           refreshKey={previewKey.current}
           onRefresh={refreshPreview}
           onOpenSettings={() => setSettingsOpen(true)}
+          files={files}
+          fileContents={fileContents}
+          selectedFile={selectedFile}
+          onSelectFile={setSelectedFile}
+          filesLoading={filesLoading}
+          buildStatus={buildStatus}
+          isGenerating={isGenerating}
         />
       </div>
 

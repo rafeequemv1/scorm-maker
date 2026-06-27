@@ -16,11 +16,22 @@ export type SandboxContext = {
   previewUrl: string;
 };
 
+export type BuilderToolEvent =
+  | { type: "status"; message: string }
+  | {
+      type: "files-written";
+      written: string[];
+      previewUrl: string;
+      files: Array<{ path: string; content: string }>;
+    };
+
 export function createBuilderTools(
   getSandbox: () => Promise<SandboxContext>,
   credentials?: AppCredentials,
+  onEvent?: (event: BuilderToolEvent) => void,
 ) {
   const requireSandbox = async () => {
+    onEvent?.({ type: "status", message: "Connecting to sandbox..." });
     if (!getProviderStatus(credentials).sandbox) {
       throw new Error(
         getSandboxSetupHint(credentials) ??
@@ -45,9 +56,19 @@ export function createBuilderTools(
           .min(1),
       }),
       execute: async ({ files }) => {
+        onEvent?.({
+          type: "status",
+          message: `Writing ${files.map((f) => f.path).join(", ")}...`,
+        });
         const { sandbox } = await requireSandbox();
         const written = await writeProjectFiles(sandbox, files);
         const previewUrl = await ensurePreviewServer(sandbox);
+        onEvent?.({
+          type: "files-written",
+          written,
+          previewUrl,
+          files,
+        });
         return {
           success: true,
           written,
@@ -63,6 +84,7 @@ export function createBuilderTools(
         path: z.string().describe("Relative file path to read"),
       }),
       execute: async ({ path }) => {
+        onEvent?.({ type: "status", message: `Reading ${path}...` });
         const { sandbox } = await requireSandbox();
         const content = await readProjectFile(sandbox, path);
         return { path, content };
@@ -73,6 +95,7 @@ export function createBuilderTools(
       description: "List all files in the website project.",
       inputSchema: z.object({}),
       execute: async () => {
+        onEvent?.({ type: "status", message: "Listing project files..." });
         const { sandbox } = await requireSandbox();
         const files = await listProjectFiles(sandbox);
         return { files };
@@ -91,4 +114,5 @@ Rules:
 - Use semantic HTML, CSS custom properties, and smooth transitions where appropriate.
 - When the user asks to change something, read existing files first if needed, then write updated files.
 - Keep external dependencies minimal — prefer CSS and vanilla JS over CDN libraries unless requested.
+- You MUST call writeFiles on the first request to build the site. Do not only describe what you would build.
 - After making changes, briefly explain what you built or changed.`;

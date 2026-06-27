@@ -5,6 +5,9 @@
     },
     "app/api/preview/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/files/route.ts": {
+      "maxDuration": 300
     }
   }
 }

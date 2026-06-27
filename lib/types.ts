@@ -17,8 +17,20 @@ export type BuilderUIMessage = UIMessage<
     files: {
       paths: string[];
     };
+    fileContent: {
+      path: string;
+      content: string;
+    };
+    status: {
+      message: string;
+    };
   }
 >;
+
+export type ProjectFile = {
+  path: string;
+  content: string;
+};
 
 export const PREVIEW_PORT = 4173;
 export const SANDBOX_WORKDIR = "/vercel/sandbox";
