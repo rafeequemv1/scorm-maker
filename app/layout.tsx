@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SiteForge — AI Website Builder",
+  title: "SCORM Forge — AI SCORM Authoring Tool",
   description:
-    "Describe your website in plain English and watch it come to life in a Vercel Sandbox.",
+    "Describe interactive lessons, quizzes, and 3D simulations in chat. Export SCORM 1.2 packages for any LMS.",
 };
 
 export default function RootLayout({
@@ -24,9 +24,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark h-full overflow-hidden">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} h-full overflow-hidden antialiased`}
       >
         {children}
       </body>

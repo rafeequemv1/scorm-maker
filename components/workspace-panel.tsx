@@ -8,11 +8,14 @@ interface WorkspacePanelProps {
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
   previewUrl: string | null;
+  previewDocument?: string | null;
   loading: boolean;
   error: string | null;
   refreshKey: number;
   onRefresh: () => void;
   onOpenSettings?: () => void;
+  onDownloadScorm?: () => void;
+  downloadingScorm?: boolean;
   files: string[];
   fileContents: ProjectFileMap;
   selectedFile: string | null;
@@ -26,11 +29,14 @@ export function WorkspacePanel({
   viewMode,
   onViewModeChange,
   previewUrl,
+  previewDocument,
   loading,
   error,
   refreshKey,
   onRefresh,
   onOpenSettings,
+  onDownloadScorm,
+  downloadingScorm,
   files,
   fileContents,
   selectedFile,
@@ -39,8 +45,10 @@ export function WorkspacePanel({
   buildStatus,
   isGenerating,
 }: WorkspacePanelProps) {
+  const hasPreview = Boolean(previewDocument || previewUrl);
+
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-zinc-950">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-zinc-950">
       <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-2">
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
@@ -75,7 +83,17 @@ export function WorkspacePanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {viewMode === "preview" && previewUrl && (
+          {files.length > 0 && onDownloadScorm && (
+            <button
+              type="button"
+              onClick={onDownloadScorm}
+              disabled={downloadingScorm}
+              className="rounded-md border border-emerald-800/50 px-2 py-1 text-xs text-emerald-400 transition hover:bg-emerald-950/50 disabled:opacity-50"
+            >
+              {downloadingScorm ? "Packaging…" : "SCORM ↓"}
+            </button>
+          )}
+          {viewMode === "preview" && hasPreview && (
             <>
               <button
                 type="button"
@@ -84,20 +102,22 @@ export function WorkspacePanel({
               >
                 Refresh
               </button>
-              <a
-                href={previewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-md px-2 py-1 text-xs text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
-              >
-                Open ↗
-              </a>
+              {previewUrl && (
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md px-2 py-1 text-xs text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  Sandbox ↗
+                </a>
+              )}
             </>
           )}
         </div>
       </div>
 
-      <div className="relative flex-1 p-3">
+      <div className="relative min-h-0 flex-1 overflow-hidden p-3">
         {viewMode === "code" ? (
           <div className="h-full overflow-hidden rounded-xl border border-zinc-800">
             <CodePanel
@@ -109,8 +129,8 @@ export function WorkspacePanel({
             />
           </div>
         ) : (
-          <div className="h-full overflow-hidden rounded-xl border border-zinc-800 bg-white shadow-2xl shadow-black/40">
-            {loading && !previewUrl && (
+          <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-white shadow-2xl shadow-black/40">
+            {loading && !hasPreview && (
               <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-900 text-zinc-400">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-indigo-500" />
                 <p className="text-sm">Starting Vercel Sandbox...</p>
@@ -118,13 +138,13 @@ export function WorkspacePanel({
               </div>
             )}
 
-            {error && !previewUrl && (
+            {error && !hasPreview && (
               <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-900 p-6 text-center">
-                <p className="text-sm text-amber-400">Preview unavailable</p>
+                <p className="text-sm text-amber-400">Sandbox preview unavailable</p>
                 <p className="max-w-sm text-xs text-zinc-500">{error}</p>
                 <p className="max-w-sm text-xs text-zinc-600">
-                  Switch to the <strong className="text-zinc-400">Code</strong> tab to
-                  see generated files while building.
+                  Generated sites still preview here once code is built. Switch to{" "}
+                  <strong className="text-zinc-400">Code</strong> to inspect files.
                 </p>
                 {onOpenSettings && (
                   <button
@@ -138,14 +158,31 @@ export function WorkspacePanel({
               </div>
             )}
 
-            {previewUrl && (
+            {previewDocument && (
               <iframe
-                key={refreshKey}
-                src={previewUrl}
+                key={`local-${refreshKey}-${previewDocument.length}`}
+                srcDoc={previewDocument}
                 title="Website preview"
-                className="h-full w-full border-0"
+                className="h-full w-full flex-1 border-0"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               />
+            )}
+
+            {!previewDocument && previewUrl && (
+              <iframe
+                key={`sandbox-${refreshKey}`}
+                src={previewUrl}
+                title="Sandbox preview"
+                className="h-full w-full flex-1 border-0"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              />
+            )}
+
+            {!previewDocument && !previewUrl && !loading && !error && (
+              <div className="flex h-full flex-col items-center justify-center gap-2 bg-zinc-900 p-6 text-center text-zinc-500">
+                <p className="text-sm">No preview yet</p>
+                <p className="text-xs">Describe a lesson in chat to generate interactive SCORM content.</p>
+              </div>
             )}
           </div>
         )}

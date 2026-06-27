@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { AppCredentials } from "@/lib/credentials";
@@ -8,6 +8,8 @@ import { loadStoredCredentials } from "@/lib/credentials";
 import type { ModelOption } from "@/lib/models";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { BuilderUIMessage } from "@/lib/types";
+import { buildPreviewDocument } from "@/lib/preview-html";
+import { downloadScormPackage } from "@/lib/scorm-packager";
 import { ChatPanel } from "./chat-panel";
 import { SettingsModal } from "./settings-modal";
 import { WorkspacePanel } from "./workspace-panel";
@@ -44,6 +46,8 @@ export function Builder() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [credentials, setCredentials] = useState<AppCredentials>({});
   const [chatError, setChatError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingScorm, setDownloadingScorm] = useState(false);
   const previewKey = useRef(0);
 
   const credentialsRef = useRef<AppCredentials>({});
@@ -214,6 +218,7 @@ export function Builder() {
     },
     onFinish: () => {
       setBuildStatus(null);
+      setViewMode("preview");
       fetchAllFiles(projectIdRef.current, credentialsRef.current);
     },
     onData: (dataPart) => {
@@ -224,12 +229,12 @@ export function Builder() {
         mergeFileContents([
           { path: dataPart.data.path, content: dataPart.data.content },
         ]);
-        setViewMode("code");
         setSelectedFile(dataPart.data.path);
       }
       if (dataPart.type === "data-preview") {
         setPreviewUrl(dataPart.data.url);
         setPreviewLoading(false);
+        setViewMode("preview");
         refreshPreview();
       }
       if (dataPart.type === "data-files") {
@@ -239,6 +244,11 @@ export function Builder() {
   });
 
   const isGenerating = status === "streaming" || status === "submitted";
+
+  const previewDocument = useMemo(
+    () => buildPreviewDocument(fileContents),
+    [fileContents],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -265,6 +275,23 @@ export function Builder() {
     setInput("");
   };
 
+  const handleDownloadScorm = async () => {
+    setDownloadError(null);
+    setDownloadingScorm(true);
+    try {
+      const title =
+        messages.find((m) => m.role === "user")?.parts.find((p) => p.type === "text")
+          ?.text?.slice(0, 60) ?? "SCORM Lesson";
+      await downloadScormPackage(fileContents, title);
+    } catch (err) {
+      setDownloadError(
+        err instanceof Error ? err.message : "Failed to create SCORM package",
+      );
+    } finally {
+      setDownloadingScorm(false);
+    }
+  };
+
   const handleNewProject = () => {
     const id = crypto.randomUUID();
     localStorage.setItem(PROJECT_ID_KEY, id);
@@ -286,8 +313,8 @@ export function Builder() {
             S
           </div>
           <div>
-            <h1 className="text-sm font-semibold text-zinc-100">SiteForge</h1>
-            <p className="text-xs text-zinc-500">AI website builder · Vercel Sandbox</p>
+            <h1 className="text-sm font-semibold text-zinc-100">SCORM Forge</h1>
+            <p className="text-xs text-zinc-500">AI SCORM authoring · Three.js · R3F · export to LMS</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -307,13 +334,24 @@ export function Builder() {
             </select>
           )}
           {files.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setViewMode("code")}
-              className="hidden text-xs text-zinc-500 hover:text-zinc-300 sm:inline"
-            >
-              {files.length} file{files.length !== 1 ? "s" : ""}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadScorm}
+                disabled={downloadingScorm || isGenerating}
+                className="rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:border-emerald-600 hover:bg-emerald-900/40 disabled:opacity-50"
+                title="Download as SCORM 1.2 ZIP for LMS upload"
+              >
+                {downloadingScorm ? "Packaging…" : "Download SCORM"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("code")}
+                className="hidden text-xs text-zinc-500 hover:text-zinc-300 sm:inline"
+              >
+                {files.length} file{files.length !== 1 ? "s" : ""}
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -332,6 +370,12 @@ export function Builder() {
         </div>
       </header>
 
+      {downloadError && (
+        <div className="shrink-0 border-b border-red-900/50 bg-red-950/40 px-4 py-2 text-xs text-red-300">
+          SCORM download failed: {downloadError}
+        </div>
+      )}
+
       {setupHint && (
         <div className="shrink-0 border-b border-amber-900/50 bg-amber-950/40 px-4 py-2.5 text-xs text-amber-200">
           <strong>Setup required:</strong> {setupHint}{" "}
@@ -345,7 +389,7 @@ export function Builder() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <ChatPanel
           messages={messages}
           input={input}
@@ -359,11 +403,14 @@ export function Builder() {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           previewUrl={previewUrl}
+          previewDocument={previewDocument}
           loading={previewLoading}
           error={previewError}
           refreshKey={previewKey.current}
           onRefresh={refreshPreview}
           onOpenSettings={() => setSettingsOpen(true)}
+          onDownloadScorm={handleDownloadScorm}
+          downloadingScorm={downloadingScorm}
           files={files}
           fileContents={fileContents}
           selectedFile={selectedFile}

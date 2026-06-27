@@ -9,33 +9,63 @@ import {
   SANDBOX_WORKDIR,
 } from "./types";
 
-async function isServerRunning(sandbox: Sandbox): Promise<boolean> {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function killPreviewServer(sandbox: Sandbox): Promise<void> {
+  try {
+    await sandbox.runCommand("sh", [
+      "-c",
+      `pkill -f "serve.*${PREVIEW_PORT}" 2>/dev/null || true`,
+    ]);
+  } catch {
+    // ignore
+  }
+}
+
+async function isPreviewServingHtml(sandbox: Sandbox): Promise<boolean> {
   try {
     const result = await sandbox.runCommand("curl", [
       "-sf",
-      `http://localhost:${PREVIEW_PORT}`,
+      `http://127.0.0.1:${PREVIEW_PORT}/`,
       "-o",
-      "/dev/null",
+      "/tmp/siteforge-preview.html",
     ]);
-    return result.exitCode === 0;
+    if (result.exitCode !== 0) return false;
+    const read = await sandbox.runCommand("cat", ["/tmp/siteforge-preview.html"]);
+    if (read.exitCode !== 0) return false;
+    const body = (await read.stdout()).toLowerCase();
+    return body.includes("<html") && body.length > 100;
   } catch {
     return false;
   }
 }
 
+async function waitForPreviewReady(sandbox: Sandbox): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (await isPreviewServingHtml(sandbox)) return;
+    await sleep(1000);
+  }
+  throw new Error("Preview server did not start in time");
+}
+
 export async function ensurePreviewServer(
   sandbox: Sandbox,
+  options?: { force?: boolean },
 ): Promise<string> {
-  const running = await isServerRunning(sandbox);
-  if (!running) {
-    await sandbox.runCommand({
-      cmd: "npx",
-      args: ["-y", "serve", "-l", String(PREVIEW_PORT), SANDBOX_WORKDIR],
-      detached: true,
-      cwd: SANDBOX_WORKDIR,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+  if (!options?.force && (await isPreviewServingHtml(sandbox))) {
+    return sandbox.domain(PREVIEW_PORT);
   }
+
+  await killPreviewServer(sandbox);
+
+  await sandbox.runCommand({
+    cmd: "npx",
+    args: ["-y", "serve", "-l", String(PREVIEW_PORT), SANDBOX_WORKDIR],
+    detached: true,
+    cwd: SANDBOX_WORKDIR,
+  });
+
+  await waitForPreviewReady(sandbox);
   return sandbox.domain(PREVIEW_PORT);
 }
 

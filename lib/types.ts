@@ -40,15 +40,15 @@ export const DEFAULT_INDEX_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Website</title>
+  <title>SCORM Lesson</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="hero">
-    <p class="eyebrow">Built with SiteForge</p>
-    <h1>Your website starts here</h1>
-    <p class="subtitle">Describe what you want in the chat and watch it come to life.</p>
-    <button class="cta">Get started</button>
+  <main class="lesson">
+    <p class="eyebrow">SCORM Forge</p>
+    <h1>Your interactive lesson starts here</h1>
+    <p class="subtitle">Describe a quiz, simulation, or 3D activity in the chat — then export as SCORM.</p>
+    <button class="cta" type="button">Begin lesson</button>
   </main>
   <script src="script.js"></script>
 </body>
@@ -65,7 +65,7 @@ body {
   place-items: center;
 }
 
-.hero {
+.hero, .lesson {
   text-align: center;
   padding: 2rem;
   max-width: 640px;
@@ -112,6 +112,9 @@ h1 {
 `;
 
 export const DEFAULT_SCRIPT_JS = `document.querySelector('.cta')?.addEventListener('click', () => {
-  alert('Ask the AI to customize this button!');
+  if (window.ScormAuthor) {
+    ScormAuthor.init();
+    ScormAuthor.setProgress(10);
+  }
 });
 `;

@@ -30,7 +30,7 @@ export function CodePanel({
 
   return (
     <div className="flex h-full overflow-hidden bg-[#0d1117]">
-      <aside className="flex w-44 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
+      <aside className="flex min-h-0 w-44 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
         <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
           Files {sorted.length > 0 && `(${sorted.length})`}
         </div>
@@ -40,7 +40,7 @@ export function CodePanel({
           )}
           {!loading && sorted.length === 0 && (
             <p className="px-2 py-1 text-xs text-zinc-600">
-              No files yet. Send a prompt to generate code.
+              No files yet. Describe a lesson in chat to generate SCORM content.
             </p>
           )}
           {sorted.map((path) => (
@@ -61,7 +61,7 @@ export function CodePanel({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {active ? (
           <>
             <div className="flex shrink-0 items-center border-b border-zinc-800 bg-zinc-950 px-4 py-2">
@@ -70,13 +70,13 @@ export function CodePanel({
                 {content ? `${content.split("\n").length} lines` : ""}
               </span>
             </div>
-            <pre className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed text-zinc-300">
+            <pre className="min-h-0 flex-1 overflow-auto overscroll-contain p-4 font-mono text-xs leading-relaxed text-zinc-300">
               <code>{content ?? "// File content loading..."}</code>
             </pre>
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-zinc-600">
-            Generated code will appear here
+            Lesson code will appear here
           </div>
         )}
       </div>

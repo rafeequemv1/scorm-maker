@@ -9,22 +9,22 @@ export type ModelOption = {
 
 export const CHAT_MODELS: ModelOption[] = [
   {
+    id: "gemini-3-flash-preview",
+    label: "Gemini 3 Flash",
+    provider: "google",
+    description: "Default — fast, great for interactive lessons",
+  },
+  {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",
     provider: "google",
-    description: "Fast, great for building sites",
+    description: "Stable, fast",
   },
   {
     id: "gemini-2.5-pro",
     label: "Gemini 2.5 Pro",
     provider: "google",
     description: "Smarter, slower",
-  },
-  {
-    id: "gemini-3-flash-preview",
-    label: "Gemini 3 Flash",
-    provider: "google",
-    description: "Latest preview model",
   },
   {
     id: "google/gemini-2.5-flash",
@@ -40,7 +40,7 @@ export const CHAT_MODELS: ModelOption[] = [
   },
 ];
 
-export const DEFAULT_MODEL_ID = "gemini-2.5-flash";
+export const DEFAULT_MODEL_ID = "gemini-3-flash-preview";
 
 export function getModelOption(modelId: string): ModelOption {
   return (
