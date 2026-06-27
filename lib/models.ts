@@ -12,13 +12,13 @@ export const CHAT_MODELS: ModelOption[] = [
     id: "gemini-3-flash-preview",
     label: "Gemini 3 Flash",
     provider: "google",
-    description: "Default — fast, great for interactive lessons",
+    description: "Newest preview — auto-falls back to 2.5 if output fails",
   },
   {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",
     provider: "google",
-    description: "Stable, fast",
+    description: "Default — most reliable for code generation",
   },
   {
     id: "gemini-2.5-pro",
@@ -40,7 +40,9 @@ export const CHAT_MODELS: ModelOption[] = [
   },
 ];
 
-export const DEFAULT_MODEL_ID = "gemini-3-flash-preview";
+export const FALLBACK_MODEL_ID = "gemini-2.5-flash";
+
+export const DEFAULT_MODEL_ID = "gemini-2.5-flash";
 
 export function getModelOption(modelId: string): ModelOption {
   return (

@@ -20,9 +20,15 @@ export type BuilderUIMessage = UIMessage<
     fileContent: {
       path: string;
       content: string;
+      streaming?: boolean;
     };
     status: {
       message: string;
+    };
+    log: {
+      stream: "stdout" | "stderr" | "system";
+      text: string;
+      timestamp: number;
     };
   }
 >;

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 export type ProjectFileMap = Record<string, string>;
 
 interface CodePanelProps {
@@ -8,6 +10,7 @@ interface CodePanelProps {
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
   loading?: boolean;
+  streamingFile?: string | null;
 }
 
 function fileIcon(path: string) {
@@ -23,10 +26,19 @@ export function CodePanel({
   selectedFile,
   onSelectFile,
   loading,
+  streamingFile,
 }: CodePanelProps) {
+  const codeScrollRef = useRef<HTMLPreElement>(null);
   const sorted = [...files].sort();
   const active = selectedFile ?? sorted[0] ?? null;
   const content = active ? contents[active] : null;
+  const isStreamingActive = Boolean(streamingFile && streamingFile === active);
+
+  useEffect(() => {
+    if (!isStreamingActive || !codeScrollRef.current) return;
+    const el = codeScrollRef.current;
+    el.scrollTop = el.scrollHeight;
+  }, [content, isStreamingActive]);
 
   return (
     <div className="flex h-full overflow-hidden bg-[#0d1117]">
@@ -56,6 +68,9 @@ export function CodePanel({
             >
               <span className="text-[10px] opacity-60">{fileIcon(path)}</span>
               <span className="truncate">{path}</span>
+              {streamingFile === path && (
+                <span className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-indigo-400" />
+              )}
             </button>
           ))}
         </div>
@@ -66,12 +81,29 @@ export function CodePanel({
           <>
             <div className="flex shrink-0 items-center border-b border-zinc-800 bg-zinc-950 px-4 py-2">
               <span className="font-mono text-xs text-zinc-400">{active}</span>
+              {isStreamingActive && (
+                <span className="ml-2 flex items-center gap-1 text-[10px] text-indigo-400">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+                  writing
+                </span>
+              )}
               <span className="ml-auto text-[11px] text-zinc-600">
                 {content ? `${content.split("\n").length} lines` : ""}
               </span>
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto overscroll-contain p-4 font-mono text-xs leading-relaxed text-zinc-300">
-              <code>{content ?? "// File content loading..."}</code>
+            <pre
+              ref={codeScrollRef}
+              className="min-h-0 flex-1 overflow-auto overscroll-contain p-4 font-mono text-xs leading-relaxed text-zinc-300"
+            >
+              <code>
+                {content ?? ""}
+                {isStreamingActive && (
+                  <span
+                    aria-hidden
+                    className="ml-px inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-indigo-400"
+                  />
+                )}
+              </code>
             </pre>
           </>
         ) : (

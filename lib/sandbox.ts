@@ -1,6 +1,8 @@
 import { Sandbox } from "@vercel/sandbox";
 import type { AppCredentials } from "./credentials";
 import { getProviderStatus, getSandboxCredentials } from "./credentials";
+import type { LogLine } from "./sandbox-logs";
+import { createLogLine } from "./sandbox-logs";
 import {
   DEFAULT_INDEX_HTML,
   DEFAULT_SCRIPT_JS,
@@ -9,20 +11,60 @@ import {
   SANDBOX_WORKDIR,
 } from "./types";
 
+export const SANDBOX_LOG_PATH = "/tmp/scormforge-serve.log";
+
+const SERVE_CONFIG = JSON.stringify(
+  {
+    public: true,
+    headers: [
+      {
+        source: "**/*.@(js|mjs)",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "text/javascript; charset=utf-8",
+          },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+        ],
+      },
+      {
+        source: "**/*.css",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "text/css; charset=utf-8",
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+
+export type SandboxLogCallback = (line: LogLine) => void;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function killPreviewServer(sandbox: Sandbox): Promise<void> {
+async function killPreviewServer(
+  sandbox: Sandbox,
+  onLog?: SandboxLogCallback,
+): Promise<void> {
   try {
-    await sandbox.runCommand("sh", [
+    const result = await sandbox.runCommand("sh", [
       "-c",
       `pkill -f "serve.*${PREVIEW_PORT}" 2>/dev/null || true`,
     ]);
+    await captureCommandOutput(result, onLog);
   } catch {
     // ignore
   }
 }
 
-async function isPreviewServingHtml(sandbox: Sandbox): Promise<boolean> {
+async function isPreviewServingHtml(
+  sandbox: Sandbox,
+  onLog?: SandboxLogCallback,
+): Promise<boolean> {
   try {
     const result = await sandbox.runCommand("curl", [
       "-sf",
@@ -34,38 +76,110 @@ async function isPreviewServingHtml(sandbox: Sandbox): Promise<boolean> {
     const read = await sandbox.runCommand("cat", ["/tmp/siteforge-preview.html"]);
     if (read.exitCode !== 0) return false;
     const body = (await read.stdout()).toLowerCase();
-    return body.includes("<html") && body.length > 100;
+    const ok = body.includes("<html") && body.length > 100;
+    if (!ok) {
+      onLog?.(createLogLine("stderr", "Preview health check: empty or invalid HTML"));
+    }
+    return ok;
   } catch {
     return false;
   }
 }
 
-async function waitForPreviewReady(sandbox: Sandbox): Promise<void> {
+async function waitForPreviewReady(
+  sandbox: Sandbox,
+  onLog?: SandboxLogCallback,
+): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    if (await isPreviewServingHtml(sandbox)) return;
+    if (await isPreviewServingHtml(sandbox, onLog)) return;
+    onLog?.(
+      createLogLine("system", `Waiting for preview… (${attempt + 1}/20)`),
+    );
     await sleep(1000);
   }
   throw new Error("Preview server did not start in time");
 }
 
+async function writeServeConfig(sandbox: Sandbox): Promise<void> {
+  await sandbox.writeFiles([
+    {
+      path: "/tmp/scormforge-serve.json",
+      content: Buffer.from(SERVE_CONFIG),
+    },
+  ]);
+}
+
+export async function readSandboxLogTail(
+  sandbox: Sandbox,
+  lines = 80,
+): Promise<LogLine[]> {
+  const result = await sandbox.runCommand("sh", [
+    "-c",
+    `tail -n ${lines} ${SANDBOX_LOG_PATH} 2>/dev/null || echo "(no serve logs yet)"`,
+  ]);
+  const stdout = await result.stdout();
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((text) => createLogLine("stdout", text));
+}
+
+async function captureCommandOutput(
+  result: { stdout: () => Promise<string>; stderr: () => Promise<string> },
+  onLog?: SandboxLogCallback,
+): Promise<void> {
+  if (!onLog) return;
+  try {
+    const stdout = await result.stdout();
+    if (stdout.trim()) {
+      for (const line of stdout.trim().split("\n")) {
+        onLog(createLogLine("stdout", line));
+      }
+    }
+    const stderr = await result.stderr();
+    if (stderr.trim()) {
+      for (const line of stderr.trim().split("\n")) {
+        onLog(createLogLine("stderr", line));
+      }
+    }
+  } catch {
+    // ignore log capture failures
+  }
+}
+
 export async function ensurePreviewServer(
   sandbox: Sandbox,
-  options?: { force?: boolean },
+  options?: { force?: boolean; onLog?: SandboxLogCallback },
 ): Promise<string> {
-  if (!options?.force && (await isPreviewServingHtml(sandbox))) {
+  const onLog = options?.onLog;
+  onLog?.(createLogLine("system", "Checking preview server…"));
+
+  if (!options?.force && (await isPreviewServingHtml(sandbox, onLog))) {
+    onLog?.(createLogLine("system", `Preview already running on port ${PREVIEW_PORT}`));
     return sandbox.domain(PREVIEW_PORT);
   }
 
-  await killPreviewServer(sandbox);
+  await killPreviewServer(sandbox, onLog);
+
+  onLog?.(
+    createLogLine(
+      "system",
+      `Starting serve on port ${PREVIEW_PORT} (ES module friendly)…`,
+    ),
+  );
 
   await sandbox.runCommand({
-    cmd: "npx",
-    args: ["-y", "serve", "-l", String(PREVIEW_PORT), SANDBOX_WORKDIR],
+    cmd: "sh",
+    args: [
+      "-c",
+      `npx -y serve -l ${PREVIEW_PORT} -n --config /tmp/scormforge-serve.json ${SANDBOX_WORKDIR} >> ${SANDBOX_LOG_PATH} 2>&1`,
+    ],
     detached: true,
     cwd: SANDBOX_WORKDIR,
   });
 
-  await waitForPreviewReady(sandbox);
+  await waitForPreviewReady(sandbox, onLog);
+  onLog?.(createLogLine("system", "Preview server ready"));
   return sandbox.domain(PREVIEW_PORT);
 }
 
@@ -100,6 +214,7 @@ export async function getProjectSandbox(
     runtime: "node24",
     timeout: 600_000,
     onCreate: async (sbx) => {
+      await writeServeConfig(sbx);
       await sbx.writeFiles([
         {
           path: `${SANDBOX_WORKDIR}/index.html`,
@@ -117,6 +232,7 @@ export async function getProjectSandbox(
     },
   });
 
+  await writeServeConfig(sandbox);
   const previewUrl = await ensurePreviewServer(sandbox);
   return { sandbox, previewUrl };
 }
@@ -154,8 +270,10 @@ export async function readProjectFile(
 export async function writeProjectFiles(
   sandbox: Sandbox,
   files: Array<{ path: string; content: string }>,
+  onLog?: SandboxLogCallback,
 ): Promise<string[]> {
   const written: string[] = [];
+  await writeServeConfig(sandbox);
   await sandbox.writeFiles(
     files.map((file) => {
       const safePath = file.path.replace(/^\/+/, "").replace(/\.\./g, "");
@@ -165,6 +283,9 @@ export async function writeProjectFiles(
         content: Buffer.from(file.content),
       };
     }),
+  );
+  onLog?.(
+    createLogLine("system", `Synced ${written.join(", ")} to sandbox`),
   );
   return written;
 }

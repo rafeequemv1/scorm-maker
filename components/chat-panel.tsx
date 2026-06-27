@@ -13,14 +13,21 @@ interface ChatPanelProps {
   isGenerating: boolean;
   error?: string | null;
   buildStatus?: string | null;
+  hasExistingLesson?: boolean;
 }
 
-const SUGGESTIONS = [
+const CREATE_SUGGESTIONS = [
   "Create a fire safety quiz with 5 multiple-choice questions and instant feedback",
   "Build a 3D solar system explorer with Three.js that learners can orbit",
   "Make a drag-and-drop anatomy labeling activity with scoring",
   "Design a branching customer service scenario with pass/fail at the end",
-  "Create an interactive Chart.js dashboard lesson about climate data",
+];
+
+const EDIT_SUGGESTIONS = [
+  "Fix the quiz so wrong answers show the correct explanation",
+  "Change the color scheme to blue and white corporate style",
+  "Add one more quiz question about topic X",
+  "Make the 3D scene rotate slower and add labels to each part",
 ];
 
 const LIBRARY_CHIPS = ["three", "r3f", "gsap", "matter", "chartjs"];
@@ -33,6 +40,7 @@ export function ChatPanel({
   isGenerating,
   error,
   buildStatus,
+  hasExistingLesson = false,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +56,8 @@ export function ChatPanel({
     const hint = `Use ${lib.name} for this lesson. `;
     setInput(input.trim() ? `${input.trim()} ${hint}` : hint);
   };
+
+  const suggestions = hasExistingLesson ? EDIT_SUGGESTIONS : CREATE_SUGGESTIONS;
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   const hasAssistantContent = Boolean(
@@ -97,7 +107,7 @@ export function ChatPanel({
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -154,6 +164,25 @@ export function ChatPanel({
             {error}
           </div>
         )}
+        {hasExistingLesson && messages.length > 0 && !isGenerating && (
+          <p className="mb-2 text-[10px] text-zinc-600">
+            Edit mode — AI reads then writes only changed files via tools.
+          </p>
+        )}
+        {hasExistingLesson && messages.length > 0 && !isGenerating && (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {EDIT_SUGGESTIONS.slice(0, 2).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setInput(s)}
+                className="rounded-full border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"
+              >
+                {s.slice(0, 42)}…
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 rounded-xl border border-zinc-700 bg-zinc-900 p-2 focus-within:border-indigo-500/50">
           <textarea
             value={input}
@@ -164,7 +193,11 @@ export function ChatPanel({
                 onSubmit(e);
               }
             }}
-            placeholder="Describe your interactive SCORM lesson..."
+            placeholder={
+              hasExistingLesson
+                ? "Describe a fix or change to this lesson..."
+                : "Describe your interactive SCORM lesson..."
+            }
             rows={2}
             disabled={isGenerating}
             className="flex-1 resize-none bg-transparent px-2 py-1 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:opacity-50"
@@ -174,7 +207,7 @@ export function ChatPanel({
             disabled={!input.trim() || isGenerating}
             className="self-end rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isGenerating ? "..." : "Create"}
+            {isGenerating ? "..." : hasExistingLesson ? "Update" : "Create"}
           </button>
         </div>
       </form>
