@@ -54,6 +54,16 @@ export function buildFileInventory(files: Record<string, string>): string {
     .join("\n");
 }
 
+export function filesToRecord(
+  files: Array<{ path: string; content: string }>,
+): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const file of files) {
+    if (file.path?.trim()) record[file.path] = file.content;
+  }
+  return record;
+}
+
 export function isValidEditOutput(
   edit: LessonEditResult | undefined,
 ): edit is LessonEditResult & {

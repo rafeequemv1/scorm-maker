@@ -1,8 +1,12 @@
 import { Output, streamText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import { z } from "zod";
-import { AUTHORING_SYSTEM_PROMPT } from "./authoring-prompt";
+import {
+  buildAuthoringSystemPrompt,
+  type AuthoringPromptOptions,
+} from "./authoring-prompt";
 import { buildFileInventory } from "./lesson-edits";
+import { appendContextToSystem } from "./message-context";
 import { buildFilesContext } from "./project-storage";
 
 export const lessonOutputSchema = z.object({
@@ -71,18 +75,43 @@ export type PartialLessonOutput = {
 export const siteOutputSchema = lessonOutputSchema;
 export type SiteOutput = LessonOutput;
 
-function buildCreatePrompt(): string {
-  return `${AUTHORING_SYSTEM_PROMPT}
+export type GenerationPromptContext = AuthoringPromptOptions & {
+  conversationContext?: string;
+};
+
+function buildCreatePrompt(ctx: GenerationPromptContext): string {
+  const { system } = buildAuthoringSystemPrompt({
+    userMessage: ctx.userMessage,
+    recentUserText: ctx.recentUserText,
+    existingFiles: ctx.existingFiles,
+    mode: "create",
+  });
+
+  return appendContextToSystem(
+    `${system}
 
 You MUST return JSON: { "files": [...], "summary": "...", "librariesUsed": [...] }
-Always include index.html. Never return empty or placeholder content.`;
+Always include index.html. Never return empty or placeholder content.`,
+    ctx.conversationContext,
+  );
 }
 
-function buildEditPrompt(existingFiles: Record<string, string>): string {
+function buildEditPrompt(
+  existingFiles: Record<string, string>,
+  ctx: GenerationPromptContext,
+): string {
+  const { system } = buildAuthoringSystemPrompt({
+    userMessage: ctx.userMessage,
+    recentUserText: ctx.recentUserText,
+    existingFiles,
+    mode: "edit",
+  });
+
   const inventory = buildFileInventory(existingFiles);
   const fileContext = buildFilesContext(existingFiles);
 
-  return `${AUTHORING_SYSTEM_PROMPT}
+  return appendContextToSystem(
+    `${system}
 
 EDIT MODE — surgical update only.
 
@@ -100,21 +129,31 @@ You MUST return JSON:
   "librariesUsed": []
 }
 
-Return ONLY files you modified in changedFiles. Omit every unchanged file.`;
+Return ONLY files you modified in changedFiles. Omit every unchanged file.`,
+    ctx.conversationContext,
+  );
 }
 
 export function streamLessonFromMessages(
   model: LanguageModel,
   messages: ModelMessage[],
   existingFiles?: Record<string, string>,
+  promptContext?: GenerationPromptContext,
 ) {
   const isEdit = Boolean(existingFiles && Object.keys(existingFiles).length > 0);
+  const ctx: GenerationPromptContext = {
+    userMessage: promptContext?.userMessage ?? "",
+    recentUserText: promptContext?.recentUserText,
+    existingFiles: promptContext?.existingFiles ?? existingFiles,
+    mode: isEdit ? "edit" : "create",
+    conversationContext: promptContext?.conversationContext,
+  };
 
   if (isEdit) {
     return streamText({
       model,
       output: Output.object({ schema: lessonEditOutputSchema }),
-      system: buildEditPrompt(existingFiles!),
+      system: buildEditPrompt(existingFiles!, ctx),
       messages,
     });
   }
@@ -122,7 +161,7 @@ export function streamLessonFromMessages(
   return streamText({
     model,
     output: Output.object({ schema: lessonOutputSchema }),
-    system: buildCreatePrompt(),
+    system: buildCreatePrompt(ctx),
     messages,
   });
 }

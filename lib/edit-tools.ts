@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { validateSingleFile } from "./lesson-validator";
 import type { LogLine } from "./sandbox-logs";
 import { createLogLine } from "./sandbox-logs";
 
@@ -60,6 +61,28 @@ export function createEditTools(
           .describe("Complete file content after your edit"),
       }),
       execute: async ({ path, content }) => {
+        const issues = validateSingleFile(path, content, files);
+        const errors = issues.filter((i) => i.severity === "error");
+        const warnings = issues.filter((i) => i.severity === "warning");
+
+        for (const w of warnings) {
+          const loc = w.line ? `${w.path}:${w.line}` : w.path ?? path;
+          emitLog(onEvent, "system", `[${w.code}] ${loc} — ${w.message}`);
+        }
+
+        if (errors.length) {
+          for (const e of errors) {
+            const loc = e.line ? `${e.path}:${e.line}` : e.path ?? path;
+            emitLog(onEvent, "stderr", `[${e.code}] ${loc} — ${e.message}`);
+          }
+          return {
+            success: false,
+            path,
+            validationErrors: errors,
+            message: `Validation failed for ${path}: ${errors.map((e) => e.message).join("; ")}`,
+          };
+        }
+
         const lines = content.split("\n").length;
         files[path] = content;
         modifiedPaths.add(path);

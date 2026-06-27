@@ -1,22 +1,36 @@
 import { stepCountIs, streamText } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
-import { AUTHORING_SYSTEM_PROMPT } from "./authoring-prompt";
+import { buildAuthoringSystemPrompt } from "./authoring-prompt";
 import {
   createEditTools,
   EDIT_TOOL_SYSTEM_PROMPT,
   type EditToolEvent,
 } from "./edit-tools";
+import type { GenerationPromptContext } from "./generate-site";
 import { buildFileInventory } from "./lesson-edits";
 import type { LessonResult } from "./lesson-edits";
+import { appendContextToSystem } from "./message-context";
 
-function buildEditToolPrompt(existingFiles: Record<string, string>): string {
+function buildEditToolPrompt(ctx: GenerationPromptContext): string {
+  const existingFiles = ctx.existingFiles ?? {};
+  const { system } = buildAuthoringSystemPrompt({
+    userMessage: ctx.userMessage,
+    recentUserText: ctx.recentUserText,
+    existingFiles,
+    mode: "edit",
+  });
+
   const inventory = buildFileInventory(existingFiles);
-  return `${AUTHORING_SYSTEM_PROMPT}
+
+  return appendContextToSystem(
+    `${system}
 
 ${EDIT_TOOL_SYSTEM_PROMPT}
 
 ## Files in this lesson
-${inventory}`;
+${inventory}`,
+    ctx.conversationContext,
+  );
 }
 
 export async function runEditWithTools(
@@ -24,14 +38,23 @@ export async function runEditWithTools(
   messages: ModelMessage[],
   existingFiles: Record<string, string>,
   onEvent: (event: EditToolEvent) => void,
+  promptContext?: GenerationPromptContext,
 ): Promise<{ result: LessonResult; changedPaths: string[] } | null> {
   const workingFiles = { ...existingFiles };
   const modifiedPaths = new Set<string>();
   const tools = createEditTools(workingFiles, modifiedPaths, onEvent);
 
+  const ctx: GenerationPromptContext = {
+    userMessage: promptContext?.userMessage ?? "",
+    recentUserText: promptContext?.recentUserText,
+    existingFiles,
+    mode: "edit",
+    conversationContext: promptContext?.conversationContext,
+  };
+
   const response = streamText({
     model,
-    system: buildEditToolPrompt(existingFiles),
+    system: buildEditToolPrompt(ctx),
     messages,
     tools,
     stopWhen: stepCountIs(12),
@@ -55,9 +78,7 @@ export async function runEditWithTools(
       files: Object.entries(workingFiles)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([path, content]) => ({ path, content })),
-      summary:
-        summary ||
-        `Updated ${changedPaths.join(", ")}`,
+      summary: summary || `Updated ${changedPaths.join(", ")}`,
     },
     changedPaths,
   };

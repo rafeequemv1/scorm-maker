@@ -1,4 +1,11 @@
-import { getLibraryPromptSection } from "./authoring-libraries";
+import {
+  describeLibraryInjection,
+  getLibraryPromptSection,
+  getRelevantLibraries,
+  matchesQuizIntent,
+  matchesThreeDIntent,
+  type AuthoringLibrary,
+} from "./authoring-libraries";
 
 export const SCORM_API_USAGE = `## SCORM runtime (included automatically on export)
 Generated lessons MUST use the global \`ScormAuthor\` API for LMS tracking:
@@ -14,7 +21,7 @@ ScormAuthor.complete(false);                 // fail
 
 Do NOT auto-complete on page load. Complete only when the learner finishes or passes the assessment.`;
 
-export const AUTHORING_SYSTEM_PROMPT = `You are SCORM Forge, an expert SCORM 1.2 e-learning authoring AI. You create interactive training modules, quizzes, simulations, and explorable 3D lessons that export to any LMS.
+const AUTHORING_CORE = `You are SCORM Forge, an expert SCORM 1.2 e-learning authoring AI. You create interactive training modules, quizzes, simulations, and explorable 3D lessons that export to any LMS.
 
 ## Your output
 Return complete lesson files as static HTML/CSS/JS — no React build step, no npm, no bundlers.
@@ -36,19 +43,27 @@ Return complete lesson files as static HTML/CSS/JS — no React build step, no n
 - Mobile-responsive, clear instructions, immediate quiz feedback
 - Professional instructional design: objective → content → practice → assessment
 - Write COMPLETE files — never placeholders
-- CDN libraries only (jsdelivr, esm.sh) — see library list
+- CDN libraries only (jsdelivr, esm.sh) — see library list below
 - For R3F: React.createElement only — NO JSX
 - Wire interactivity to ScormAuthor for completion and scoring
-- Max 15 files
+- Max 15 files`;
 
-## Three.js / WebGL requirements
+export const THREE_JS_REQUIREMENTS = `## Three.js / WebGL requirements
 - Always add \`<canvas id="scene-canvas"></canvas>\` and size it: \`canvas { width:100%; height:100%; display:block }\`, \`html,body { margin:0; height:100%; overflow:hidden }\`
 - In scene.js use \`import * as THREE from "https://esm.sh/three"\` and \`import { OrbitControls } from "https://esm.sh/three/examples/jsm/controls/OrbitControls.js"\`
 - Call \`renderer.setSize(window.innerWidth, window.innerHeight)\` and handle \`window.resize\`
 - Use \`requestAnimationFrame\` render loop — never leave canvas blank
-- Test that the scene has visible lights and meshes
+- Test that the scene has visible lights and meshes`;
 
-## Iterative editing (follow-up messages)
+export const QUIZ_PATTERNS_SECTION = `## Quiz implementation patterns
+- Store questions in a \`questions[]\` array with \`id\`, \`prompt\`, \`options\`, \`correctIndex\`, \`explanation\`
+- Show one question at a time or paginate with clear Next/Submit buttons
+- On answer: immediate feedback (correct/incorrect + explanation)
+- Call \`ScormAuthor.recordInteraction(id, "choice", result, learnerAnswer)\` per question
+- Track score; call \`ScormAuthor.setScore(raw, 0, max)\` and \`ScormAuthor.setProgress(percent)\`
+- Complete with \`ScormAuthor.complete(passed)\` only after the learner finishes (typical pass: 80%)`;
+
+const EDIT_MODE_RULES = `## Iterative editing (follow-up messages)
 When existing lesson files are provided, you are in **EDIT MODE** — not a greenfield build.
 
 ### Golden rules
@@ -59,18 +74,75 @@ When existing lesson files are provided, you are in **EDIT MODE** — not a gree
 5. **Minimum diff mindset** — prefer a 3-line fix over rewriting a 200-line file. If a 5-line change suffices, do not reorganize the whole file.
 6. Use \`deletedPaths\` only when the user asks to remove a file.
 
-### Examples
-- "Change title to Safety 101" → only index.html in changedFiles, one line changed
-- "Fix planet click handler" → only scene.js (or script.js), fix the handler, leave the rest identical
-- "Add a quiz question" → only the file containing the quiz data
-- "Make fonts bigger" → only styles.css
-
 ### Do NOT
 - Return all lesson files when only one needs a change
 - Rename variables or restructure code the user did not mention
 - Remove or rewrite the 3D scene when fixing a typo in the UI overlay
-- Drop ScormAuthor integration during edits
+- Drop ScormAuthor integration during edits`;
 
-${SCORM_API_USAGE}
+export type AuthoringPromptOptions = {
+  userMessage: string;
+  recentUserText?: string;
+  existingFiles?: Record<string, string>;
+  mode: "create" | "edit";
+};
 
-${getLibraryPromptSection()}`;
+export type BuiltAuthoringPrompt = {
+  system: string;
+  libraries: AuthoringLibrary[];
+  injectionLabel: string;
+};
+
+export function buildAuthoringSystemPrompt(
+  options: AuthoringPromptOptions,
+): BuiltAuthoringPrompt {
+  const libraries = getRelevantLibraries({
+    userMessage: options.userMessage,
+    recentUserText: options.recentUserText,
+    existingFiles: options.existingFiles,
+    mode: options.mode,
+  });
+
+  const includeQuiz = matchesQuizIntent(
+    [options.userMessage, options.recentUserText].filter(Boolean).join("\n"),
+  );
+  const includeThreeD =
+    libraries.some((l) => l.id === "three" || l.id === "r3f") &&
+    (options.mode === "create" || matchesThreeDIntent(options.userMessage));
+
+  const sections = [AUTHORING_CORE];
+
+  if (options.mode === "edit") {
+    sections.push(EDIT_MODE_RULES);
+  }
+
+  if (includeThreeD) {
+    sections.push(THREE_JS_REQUIREMENTS);
+  }
+
+  if (includeQuiz) {
+    sections.push(QUIZ_PATTERNS_SECTION);
+  }
+
+  sections.push(SCORM_API_USAGE);
+  sections.push(
+    getLibraryPromptSection(libraries, {
+      includeHints: libraries.length > 0,
+    }),
+  );
+
+  return {
+    system: sections.join("\n\n"),
+    libraries,
+    injectionLabel: describeLibraryInjection(libraries, {
+      ...options,
+      includeQuizPatterns: includeQuiz,
+    }),
+  };
+}
+
+/** @deprecated use buildAuthoringSystemPrompt() — includes full library catalog */
+export const AUTHORING_SYSTEM_PROMPT = buildAuthoringSystemPrompt({
+  userMessage: "",
+  mode: "create",
+}).system;
